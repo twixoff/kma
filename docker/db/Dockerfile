@@ -1,0 +1,2 @@
+FROM mysql:8 AS db
+ENTRYPOINT ""
