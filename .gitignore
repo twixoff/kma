@@ -1,2 +1,3 @@
 /app/vendor/
-/var/mysql/
+/app/supervisord.pid
+/var/*

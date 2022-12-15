@@ -1,6 +1,7 @@
 CREATE TABLE IF NOT EXISTS `results`
 (
  `id`               INT(10) AUTO_INCREMENT,
+ `worker_id`        INT(10) NOT NULL,
  `url`              VARCHAR(255) NOT NULL,
  `code`             INT NOT NULL,
  `header`           TEXT NOT NULL,

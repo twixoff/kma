@@ -10,7 +10,12 @@ use PhpAmqpLib\Message\AMQPMessage;
 
 $exchange = $_ENV['EXCHANGE_NAME'];
 $queue = $_ENV['QUEUE_NAME'];
-$connection = MyAMQP::getConnect();
+try {
+    $connection = MyAMQP::getConnect();
+} catch (Exception|RuntimeException $e) {
+    echo "Consumer AMQP connection error: " .$e->getMessage() . "\n";
+    exit();
+}
 $channel = $connection->channel();
 $channel->queue_declare($queue, false, true, false, false);
 
@@ -33,7 +38,12 @@ function processTask(string $url): bool
         $headers = substr($response, 0, $headerSize);
         $content = substr($response, $headerSize);
 
-        saveResult(['url' => $url, 'code' => $responseCode, 'header' => $headers, 'body' => $content]);
+        try {
+            saveResult(['url' => $url, 'code' => $responseCode, 'header' => $headers, 'body' => $content]);
+        } catch (Exception $e) {
+            echo "Error saving in db: " . $e->getMessage() . "\n";
+            return false;
+        }
 
         return true;
     } else {
@@ -45,15 +55,22 @@ function processTask(string $url): bool
 
 function saveResult(array $parts): void
 {
-    $db = new PDO('mysql:dbname=' . $_ENV['MYSQL_DATABASE'] . ';host=kma-db:3306', $_ENV['MYSQL_USER'], $_ENV['MYSQL_PASSWORD']);
+    $db = new PDO(
+        'mysql:dbname=' . $_ENV['MYSQL_DATABASE'] . ';host=' . $_ENV['MYSQL_HOST'] . ':3306',
+        $_ENV['MYSQL_USER'],
+        $_ENV['MYSQL_PASSWORD']
+    );
     $sql = $db->prepare(
         "insert into results set
+        worker_id = :worker_id,
         url = :url,
         code = :code,
         header = :header,
         body = :body"
     );
+
     $sql->execute([
+        ':worker_id' => getmypid(),
         ':url' => $parts['url'],
         ':code' => $parts['code'],
         ':header' => $parts['header'],
@@ -63,20 +80,24 @@ function saveResult(array $parts): void
 
 function processMessage(AMQPMessage $message)
 {
-    echo "Processing " . $message->body . "\n";
+    echo "Processing (" . date('H:i:s') . ") " . $message->body . "\n";
     if (processTask($message->body)) {
         $message->ack();
     } else {
         $message->nack(!$message->isRedelivered());
     }
-    sleep(30);
 }
 
 $channel->basic_qos(null, 1, null);
 $channel->basic_consume($queue, '', false, false, false, false, 'processMessage');
-while ($channel->is_open()) {
-    $channel->wait();
-}
 
-$channel->close();
-$connection->close();
+try {
+    while ($channel->is_open()) {
+        $channel->wait(null, false, 30);
+    }
+    $channel->close();
+    $connection->close();
+} catch (Exception|RuntimeException $e) {
+    echo "Consumer AMQP wait or close connection error: " .$e->getMessage() . "\n";
+    exit();
+}
